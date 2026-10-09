@@ -1,1 +1,1000 @@
+#!/usr/bin/env python3# -*- coding: utf-8 -*-
+"""
+🌍 NEXUS EARTH LIVE — Vidéo Temps Réel + Cesium 3D
+Auteur : Aissa Mohammedi (DGK)
+Version : 2.0.0 — LIVE VIDEO
+Description :
+• Vue 3D Cesium (comme avant)
+• Stream caméra ISS NASA en direct
+• Webcams publiques par ville/zone
+• Flux satellite météo temps réel
+• Overlay vidéo flottant déplaçable
+• Recherche ville → charge les caméras live
+"""
 
+import os
+import sys
+import json
+import socket
+import threading
+import subprocess
+import http.server
+import socketserver
+import webbrowser
+import platform
+from datetime import datetime
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CONFIG
+# ═══════════════════════════════════════════════════════════════════════════
+VERSION = "2.0.0"
+AUTEUR = "Aissa Mohammedi (DGK)"
+PORT_BASE = 8080
+HOST = "127.0.0.1"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BASE DE DONNÉES DES FLUX VIDÉO PUBLICS
+# ═══════════════════════════════════════════════════════════════════════════
+STREAMS = {
+# ═══ ISS — Station Spatiale Internationale ═══
+"iss_live": {
+"nom": "🌌 ISS Live (NASA)",
+"type": "youtube",
+"url": "https://www.youtube.com/embed/xAieE-QtOeM?autoplay=1&mute=1",
+"lat": 0, "lng": 0,
+"desc": "Vue en direct de la Station Spatiale Internationale",
+},
+"iss_hd": {
+"nom": "🛰️ ISS HD Earth Viewing",
+"type": "youtube",
+"url": "https://www.youtube.com/embed/86YLFOog4GM?autoplay=1&mute=1",
+"lat": 0, "lng": 0,
+"desc": "Flux HD depuis l'ISS",
+},
+
+# ═══ Webcams publiques par ville ═══
+"new_york": {
+"nom": "🗽 New York — Times Square",
+"type": "youtube",
+"url": "https://www.youtube.com/embed/1-iS7LArMPA?autoplay=1&mute=1",
+"lat": 40.7580, "lng": -73.9855,
+"desc": "Times Square en direct",
+},
+"paris": {
+"nom": "🗼 Paris — Tour Eiffel",
+"type": "youtube",
+"url": "https://www.youtube.com/embed/5MY0yGnAXwM?autoplay=1&mute=1",
+"lat": 48.8584, "lng": 2.2945,
+"desc": "Tour Eiffel en direct",
+},
+"montreal": {
+"nom": "🍁 Montréal",
+"type": "youtube",
+"url": "https://www.youtube.com/embed/7ZY1Z-3T8K0?autoplay=1&mute=1",
+"lat": 45.5019, "lng": -73.5674,
+"desc": "Vue de Montréal",
+},
+"london": {
+"nom": "🇬🇧 Londres",
+"type": "youtube",
+"url": "https://www.youtube.com/embed/1cQy0kR6d8E?autoplay=1&mute=1",
+"lat": 51.5074, "lng": -0.1278,
+"desc": "Londres en direct",
+},
+"tokyo": {
+"nom": "🗾 Tokyo — Shibuya",
+"type": "youtube",
+"url": "https://www.youtube.com/embed/2Hd8LNSJcvo?autoplay=1&mute=1",
+"lat": 35.6595, "lng": 139.7005,
+"desc": "Shibuya Crossing en direct",
+},
+"dubai": {
+"nom": "🏙️ Dubaï",
+"type": "youtube",
+"url": "https://www.youtube.com/embed/2L9bF1g2Vdg?autoplay=1&mute=1",
+"lat": 25.2048, "lng": 55.2708,
+"desc": "Dubaï en direct",
+},
+"miami": {
+"nom": "🌴 Miami Beach",
+"type": "youtube",
+"url": "https://www.youtube.com/embed/2RvyqKs0vNs?autoplay=1&mute=1",
+"lat": 25.7617, "lng": -80.1918,
+"desc": "Miami Beach en direct",
+},
+"venice": {
+"nom": "🚤 Venise",
+"type": "youtube",
+"url": "https://www.youtube.com/embed/4QbTg8P1Z0M?autoplay=1&mute=1",
+"lat": 45.4408, "lng": 12.3155,
+"desc": "Venise en direct",
+},
+
+# ═══ Satellites météo (images live) ═══
+"meteo_europe": {
+"nom": "🌤️ Météo Europe (satellite)",
+"type": "image",
+"url": "https://www.meteo60.fr/satellites/satellite-europe.jpg",
+"lat": 48.0, "lng": 10.0,
+"desc": "Image satellite Europe — mise à jour toutes les 15 min",
+},
+"meteo_france": {
+"nom": "🌦️ Météo France (satellite)",
+"type": "image",
+"url": "https://www.meteo60.fr/satellites/satellite-france.jpg",
+"lat": 46.2276, "lng": 2.2137,
+"desc": "Image satellite France",
+},
+"meteo_monde": {
+"nom": "🌍 Météo Monde (satellite)",
+"type": "image",
+"url": "https://cdn.star.nesdis.noaa.gov/GOES16/ABI/FD/GEOCOLOR/1808x1808.jpg",
+"lat": 0, "lng": 0,
+"desc": "NOAA GOES-16 — disque complet",
+},
+
+# ═══ Trafic en direct ═══
+"trafic_paris": {
+"nom": "🚗 Trafic Paris",
+"type": "image",
+"url": "https://www.sytadin.fr/images/carte_trafic.jpg",
+"lat": 48.8566, "lng": 2.3522,
+"desc": "Trafic temps réel Paris",
+},
+
+# ═══ Aéroports live ═══
+"airport_jfk": {
+"nom": "✈️ JFK Airport",
+"type": "youtube",
+"url": "https://www.youtube.com/embed/GKZgX1wX6-s?autoplay=1&mute=1",
+"lat": 40.6413, "lng": -73.7781,
+"desc": "JFK live cam",
+},
+"airport_lhr": {
+"nom": "✈️ Heathrow Airport",
+"type": "youtube",
+"url": "https://www.youtube.com/embed/2q1b_7DZvNo?autoplay=1&mute=1",
+"lat": 51.4700, "lng": -0.4543,
+"desc": "Heathrow live cam",
+},
+
+# ═══ Trains live ═══
+"train_japan": {
+"nom": "🚄 Shinkansen Live",
+"type": "youtube",
+"url": "https://www.youtube.com/embed/4fVkQZ77CkQ?autoplay=1&mute=1",
+"lat": 35.6812, "lng": 139.7671,
+"desc": "Train japonais en direct",
+},
+
+# ═══ Espace — Fusées et lancements ═══
+"spacex": {
+"nom": "🚀 SpaceX Live",
+"type": "youtube",
+"url": "https://www.youtube.com/embed/21X5lGlDOfg?autoplay=1&mute=1",
+"lat": 28.5729, "lng": -80.6490,
+"desc": "SpaceX — lancements en direct",
+},
+"nasa": {
+"nom": "🌌 NASA TV",
+"type": "youtube",
+"url": "https://www.youtube.com/embed/21X5lGlDOfg?autoplay=1&mute=1",
+"lat": 28.5729, "lng": -80.6490,
+"desc": "NASA TV en direct",
+},
+
+# ═══ Volcans ═══
+"volcano_iceland": {
+"nom": "🌋 Volcan Islande",
+"type": "youtube",
+"url": "https://www.youtube.com/embed/QqfSa0ZThCU?autoplay=1&mute=1",
+"lat": 63.9900, "lng": -22.5400,
+"desc": "Volcan islandais en direct",
+},
+
+# ═══ Aquariums / zoos ═══
+"aquarium_monterey": {
+"nom": "🐠 Aquarium Monterey",
+"type": "youtube",
+"url": "https://www.youtube.com/embed/V7d3b4htD0U?autoplay=1&mute=1",
+"lat": 36.6182, "lng": -121.9015,
+"desc": "Aquarium en direct",
+},
+
+# ═══ Plages ═══
+"beach_hawaii": {
+"nom": "🌊 Hawaii Beach",
+"type": "youtube",
+"url": "https://www.youtube.com/embed/3JZ_D3ELwOQ?autoplay=1&mute=1",
+"lat": 21.3069, "lng": -157.8583,
+"desc": "Plage Hawaii en direct",
+},
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# HTML — INTERFACE COMPLÈTE
+# ═══════════════════════════════════════════════════════════════════════════
+HTML = r"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>🌍 NEXUS EARTH LIVE</title>
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.120/Build/Cesium/Cesium.js"></script>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.120/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
+font-family: -apple-system, BlinkMacSystemFont, 'Courier New', monospace; }
+
+#cesiumContainer { width: 100%; height: 100%; }
+
+/* ═══ Panneau de recherche ═══ */
+#search-panel {
+position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+z-index: 1000; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
+background: rgba(0, 0, 0, 0.9); padding: 10px 14px; border-radius: 12px;
+border: 1px solid rgba(0, 212, 255, 0.5);
+box-shadow: 0 0 30px rgba(0, 212, 255, 0.4);
+backdrop-filter: blur(20px); max-width: 96vw;
+}
+
+#search-input {
+background: rgba(255,255,255,0.08);
+border: 1px solid rgba(0, 212, 255, 0.5);
+color: #fff; padding: 10px 16px; border-radius: 8px;
+font-size: 13px; width: 300px; outline: none;
+font-family: inherit;
+}
+#search-input:focus { border-color: #00d4ff; box-shadow: 0 0 20px rgba(0,212,255,0.6); }
+
+.btn {
+background: linear-gradient(135deg, #00d4ff, #ff2d55);
+border: none; color: #000; padding: 10px 16px; border-radius: 8px;
+font-size: 12px; font-weight: 700; cursor: pointer;
+font-family: inherit; transition: all 0.2s; white-space: nowrap;
+}
+.btn:hover { transform: scale(1.05); box-shadow: 0 0 25px rgba(0,212,255,0.8); }
+.btn.space { background: linear-gradient(135deg, #9d4edd, #ff2d55); color: #fff; }
+.btn.live { background: linear-gradient(135deg, #ff0000, #ff2d55); color: #fff;
+animation: pulse 1.5s infinite; }
+@keyframes pulse {
+0%, 100% { box-shadow: 0 0 10px rgba(255,0,0,0.5); }
+50% { box-shadow: 0 0 30px rgba(255,0,0,0.9); }
+}
+
+/* ═══ Panneau coordonnées ═══ */
+#coords-panel {
+position: fixed; bottom: 20px; left: 20px;
+background: rgba(0, 0, 0, 0.9); padding: 12px 16px; border-radius: 10px;
+border: 1px solid rgba(0, 212, 255, 0.4);
+color: #00d4ff; font-size: 11px; z-index: 1000;
+backdrop-filter: blur(15px); line-height: 1.7;
+}
+#coords-panel .label { color: #6a6a8a; }
+
+/* ═══ Niveau de zoom ═══ */
+#zoom-level {
+position: fixed; top: 100px; left: 16px;
+background: rgba(0, 0, 0, 0.9); padding: 10px 14px; border-radius: 8px;
+border: 1px solid rgba(157, 78, 221, 0.4);
+color: #9d4edd; font-size: 11px; z-index: 1000;
+backdrop-filter: blur(15px); letter-spacing: 1.5px;
+}
+
+/* ═══ Hint clavier ═══ */
+#hint {
+position: fixed; bottom: 20px; right: 20px;
+background: rgba(0, 0, 0, 0.9); padding: 10px 14px; border-radius: 8px;
+border: 1px solid rgba(255, 45, 85, 0.4);
+color: #ff2d55; font-size: 10px; z-index: 1000;
+backdrop-filter: blur(15px); line-height: 1.6;
+}
+
+/* ═══ VIDÉO LIVE FLOATING ═══ */
+#video-panel {
+position: fixed; top: 100px; right: 16px;
+width: 380px; max-width: 92vw; z-index: 2000;
+background: rgba(0, 0, 0, 0.95); border-radius: 12px;
+border: 1px solid rgba(255, 0, 0, 0.6);
+box-shadow: 0 0 40px rgba(255, 0, 0, 0.4);
+backdrop-filter: blur(20px);
+overflow: hidden; display: none;
+transition: all 0.3s;
+}
+#video-panel.on { display: block; }
+#video-panel.minimized {
+width: 200px;
+}
+#video-panel.minimized .video-body { display: none; }
+
+.video-header {
+padding: 10px 14px; background: rgba(255, 0, 0, 0.2);
+border-bottom: 1px solid rgba(255, 0, 0, 0.4);
+display: flex; align-items: center; gap: 8px;
+cursor: move; user-select: none;
+}
+.video-header .live-dot {
+width: 8px; height: 8px; border-radius: 50%; background: #ff0000;
+animation: blink 1s infinite;
+}
+@keyframes blink { 50% { opacity: 0.3; } }
+.video-header .title {
+flex: 1; color: #fff; font-size: 12px; font-weight: 700;
+overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.video-header .controls { display: flex; gap: 4px; }
+.video-header .controls button {
+background: rgba(255,255,255,0.15); border: none;
+color: #fff; width: 22px; height: 22px; border-radius: 50%;
+cursor: pointer; font-size: 12px; line-height: 1;
+display: flex; align-items: center; justify-content: center;
+}
+.video-header .controls button:hover { background: rgba(255,255,255,0.3); }
+
+.video-body {
+width: 100%; aspect-ratio: 16/9; background: #000;
+position: relative; overflow: hidden;
+}
+.video-body iframe,
+.video-body img {
+width: 100%; height: 100%; border: none; display: block;
+object-fit: cover;
+}
+
+.video-info {
+padding: 8px 14px; color: #888; font-size: 10px;
+border-top: 1px solid rgba(255, 255, 255, 0.1);
+font-family: inherit;
+}
+
+/* ═══ LISTE DES STREAMS ═══ */
+#streams-list {
+position: fixed; top: 100px; left: 16px;
+width: 260px; max-height: 70vh; overflow-y: auto;
+background: rgba(0, 0, 0, 0.9); border-radius: 12px;
+border: 1px solid rgba(0, 212, 255, 0.3);
+backdrop-filter: blur(15px); z-index: 1500;
+display: none; padding: 8px;
+}
+#streams-list.on { display: block; }
+#streams-list h3 {
+color: #00d4ff; font-size: 11px; padding: 8px 10px;
+text-transform: uppercase; letter-spacing: 1.5px;
+border-bottom: 1px solid rgba(0, 212, 255, 0.2);
+margin-bottom: 6px;
+}
+.stream-item {
+padding: 8px 10px; border-radius: 6px; cursor: pointer;
+color: #ccc; font-size: 11px; transition: all 0.15s;
+display: flex; align-items: center; gap: 8px;
+}
+.stream-item:hover { background: rgba(0, 212, 255, 0.15); color: #fff; }
+.stream-item .icon { font-size: 14px; }
+
+/* ═══ LOADING ═══ */
+.loading {
+position: fixed; inset: 0; background: #000;
+display: flex; align-items: center; justify-content: center;
+flex-direction: column; color: #00d4ff; z-index: 9999;
+transition: opacity 1s;
+}
+.loading.hidden { opacity: 0; pointer-events: none; }
+.loading-orb {
+width: 70px; height: 70px; border-radius: 50%;
+border: 2px solid #00d4ff; border-top-color: #ff2d55;
+animation: spin 1s linear infinite; margin-bottom: 20px;
+box-shadow: 0 0 40px rgba(0, 212, 255, 0.6);
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ═══ MOBILE ═══ */
+@media (max-width: 700px) {
+#search-input { width: 180px; font-size: 11px; padding: 8px 12px; }
+.btn { padding: 8px 12px; font-size: 10px; }
+#video-panel { width: 92vw; top: auto; bottom: 80px; right: 4vw; }
+#streams-list { width: 92vw; top: auto; bottom: 80px; left: 4vw; }
+#coords-panel, #hint, #zoom-level { font-size: 9px; padding: 8px; }
+#hint { display: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="loading" id="loading">
+<div class="loading-orb"></div>
+<div style="font-size:12px;letter-spacing:2px;">CHARGEMENT DE LA TERRE LIVE...</div>
+</div>
+
+<div id="cesiumContainer"></div>
+
+<!-- Barre de recherche -->
+<div id="search-panel">
+<input type="text" id="search-input" placeholder="Ville, lieu, ou lat,lng..." />
+<button class="btn" onclick="searchPlace()">🔍 ZOOMER</button>
+<button class="btn space" onclick="flyToSpace()">🚀 ESPACE</button>
+<button class="btn live" onclick="toggleStreamsList()">📺 LIVE</button>
+</div>
+
+<!-- Niveau de zoom -->
+<div id="zoom-level">
+<span id="zoom-label">📡 VUE : ESPACE</span>
+</div>
+
+<!-- Coordonnées -->
+<div id="coords-panel">
+<div><span class="label">Lat : </span><span id="coord-lat">--</span></div>
+<div><span class="label">Lng : </span><span id="coord-lng">--</span></div>
+<div><span class="label">Alt : </span><span id="coord-alt">--</span></div>
+</div>
+
+<!-- Hint -->
+<div id="hint">
+🖱️ Glisser : rotation<br>
+🎡 Molette : zoom<br>
+🎯 Double-clic : zoom direct<br>
+📺 LIVE : ouvre les flux vidéo
+</div>
+
+<!-- Liste des streams -->
+<div id="streams-list">
+<h3>📺 Flux vidéo disponibles</h3>
+<div id="streams-content"></div>
+</div>
+
+<!-- Panneau vidéo flottant -->
+<div id="video-panel">
+<div class="video-header" id="video-header">
+<div class="live-dot"></div>
+<div class="title" id="video-title">—</div>
+<div class="controls">
+<button onclick="minimizeVideo()" title="Réduire">—</button>
+<button onclick="closeVideo()" title="Fermer">✕</button>
+</div>
+</div>
+<div class="video-body" id="video-body"></div>
+<div class="video-info" id="video-info">—</div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// CONFIG CESIUM
+// ═══════════════════════════════════════════════════════════════════════════
+Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlYWE1OWUxNy1mMWZiLTQzYjYtYTQ0OS1kMWFjYmFkNjc5YzciLCJpZCI6NTc3MzMsImlhdCI6MTYyNzg0NTE4Mn0.XcKpgANiY19MC4bdFUXMVEBToBmqS8kuYpUlxJHYZxk';
+
+const viewer = new Cesium.Viewer('cesiumContainer', {
+terrain: Cesium.Terrain.fromWorldTerrain(),
+baseLayer: Cesium.ImageryLayer.fromWorldImagery({
+style: Cesium.IonWorldImageryStyle.AERIAL_WITH_LABELS_ON_DEMAND
+}),
+baseLayerPicker: false,
+geocoder: false,
+homeButton: true,
+sceneModePicker: true,
+navigationHelpButton: false,
+animation: false,
+timeline: false,
+fullscreenButton: true,
+shouldAnimate: true,
+infoBox: false,
+selectionIndicator: false
+});
+
+viewer.scene.fog.enabled = true;
+viewer.scene.globe.showGroundAtmosphere = true;
+viewer.scene.skyAtmosphere.show = true;
+viewer.scene.globe.enableLighting = true;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SONS
+// ═══════════════════════════════════════════════════════════════════════════
+let audioCtx = null;
+function initAudio() {
+if (!audioCtx) {
+try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+catch (e) { }
+}
+}
+
+function playWhoosh() {
+initAudio();
+if (!audioCtx) return;
+const now = audioCtx.currentTime;
+const osc = audioCtx.createOscillator();
+const gain = audioCtx.createGain();
+osc.connect(gain); gain.connect(audioCtx.destination);
+osc.type = 'sine';
+osc.frequency.setValueAtTime(900, now);
+osc.frequency.exponentialRampToValueAtTime(150, now + 0.8);
+gain.gain.setValueAtTime(0.1, now);
+gain.gain.exponentialRampToValueAtTime(0.001, now + 0.9);
+osc.start(now); osc.stop(now + 0.9);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NAVIGATION
+// ═══════════════════════════════════════════════════════════════════════════
+function flyToSpace() {
+playWhoosh();
+viewer.camera.flyTo({
+destination: Cesium.Cartesian3.fromDegrees(0, 0, 40000000),
+orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
+duration: 4.0
+});
+document.getElementById('zoom-label').textContent = '📡 VUE : ESPACE PROFOND';
+}
+
+function flyToLocation(lat, lng, altitude = 5000) {
+playWhoosh();
+viewer.camera.flyTo({
+destination: Cesium.Cartesian3.fromDegrees(lng, lat, altitude),
+orientation: {
+heading: 0,
+pitch: Cesium.Math.toRadians(-45),
+roll: 0
+},
+duration: 3.5
+});
+}
+
+async function searchPlace() {
+const query = document.getElementById('search-input').value.trim();
+if (!query) return;
+
+const coordMatch = query.match(/^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/);
+if (coordMatch) {
+const lat = parseFloat(coordMatch[1]);
+const lng = parseFloat(coordMatch[2]);
+if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+flyToLocation(lat, lng, 5000);
+findNearbyStreams(lat, lng);
+return;
+}
+}
+
+try {
+const response = await fetch(
+`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`,
+{ headers: { 'User-Agent': 'NexusEarthLive/2.0' } }
+);
+const data = await response.json();
+if (data && data.length > 0) {
+const lat = parseFloat(data[0].lat);
+const lng = parseFloat(data[0].lon);
+flyToLocation(lat, lng, 5000);
+setTimeout(() => findNearbyStreams(lat, lng), 2000);
+} else {
+alert('Lieu introuvable.');
+}
+} catch (e) {
+alert('Erreur de recherche.');
+}
+}
+
+document.getElementById('search-input').addEventListener('keypress', (e) => {
+if (e.key === 'Enter') searchPlace();
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SUIVI COORDONNÉES
+// ═══════════════════════════════════════════════════════════════════════════
+const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+
+handler.setInputAction((movement) => {
+const cartesian = viewer.camera.pickEllipsoid(movement.endPosition, viewer.scene.globe.ellipsoid);
+if (cartesian) {
+const carto = Cesium.Cartographic.fromCartesian(cartesian);
+const lat = Cesium.Math.toDegrees(carto.latitude).toFixed(4);
+const lng = Cesium.Math.toDegrees(carto.longitude).toFixed(4);
+const height = viewer.camera.positionCartographic.height;
+
+document.getElementById('coord-lat').textContent = lat + '°';
+document.getElementById('coord-lng').textContent = lng + '°';
+
+let altText;
+if (height > 1000000) altText = (height / 1000000).toFixed(2) + ' Mm';
+else if (height > 1000) altText = (height / 1000).toFixed(1) + ' km';
+else altText = height.toFixed(0) + ' m';
+document.getElementById('coord-alt').textContent = altText;
+
+let label;
+if (height > 10000000) label = '📡 VUE : ESPACE PROFOND';
+else if (height > 1000000) label = '🛰 VUE : ORBITE';
+else if (height > 100000) label = '🌍 VUE : CONTINENT';
+else if (height > 10000) label = '🏙 VUE : RÉGION';
+else if (height > 1000) label = '🏘 VUE : VILLE';
+else if (height > 100) label = '🏠 VUE : QUARTIER';
+else label = '🔬 VUE : SURFACE';
+document.getElementById('zoom-label').textContent = label;
+}
+}, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+handler.setInputAction((movement) => {
+const cartesian = viewer.camera.pickEllipsoid(movement.position, viewer.scene.globe.ellipsoid);
+if (cartesian) {
+const carto = Cesium.Cartographic.fromCartesian(cartesian);
+const lat = Cesium.Math.toDegrees(carto.latitude);
+const lng = Cesium.Math.toDegrees(carto.longitude);
+flyToLocation(lat, lng, 500);
+setTimeout(() => findNearbyStreams(lat, lng), 1500);
+}
+}, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VIDÉO LIVE FLOTTANTE
+// ═══════════════════════════════════════════════════════════════════════════
+let currentStream = null;
+let isMinimized = false;
+
+function openVideo(streamKey) {
+const stream = STREAMS[streamKey];
+if (!stream) return;
+
+currentStream = streamKey;
+
+const panel = document.getElementById('video-panel');
+const title = document.getElementById('video-title');
+const body = document.getElementById('video-body');
+const info = document.getElementById('video-info');
+
+title.textContent = stream.nom;
+info.textContent = stream.desc;
+
+if (stream.type === 'youtube') {
+body.innerHTML = `<iframe src="${stream.url}"
+allow="autoplay; encrypted-media; picture-in-picture"
+allowfullscreen></iframe>`;
+} else if (stream.type === 'image') {
+body.innerHTML = `<img src="${stream.url}?t=${Date.now()}"
+onerror="this.style.display='none';this.parentNode.innerHTML='<div style=\\'color:#f87171;padding:20px;text-align:center;\\'>Flux indisponible</div>'" />`;
+} else if (stream.type === 'video') {
+body.innerHTML = `<video src="${stream.url}" autoplay muted loop playsinline
+style="width:100%;height:100%;object-fit:cover;"></video>`;
+}
+
+panel.classList.add('on');
+panel.classList.remove('minimized');
+isMinimized = false;
+}
+
+function closeVideo() {
+document.getElementById('video-panel').classList.remove('on');
+document.getElementById('video-body').innerHTML = '';
+currentStream = null;
+}
+
+function minimizeVideo() {
+const panel = document.getElementById('video-panel');
+panel.classList.toggle('minimized');
+isMinimized = panel.classList.contains('minimized');
+}
+
+// Drag du panneau vidéo
+(function makeDraggable() {
+const panel = document.getElementById('video-panel');
+const header = document.getElementById('video-header');
+let isDown = false, offsetX = 0, offsetY = 0;
+
+header.addEventListener('mousedown', (e) => {
+if (e.target.tagName === 'BUTTON') return;
+isDown = true;
+offsetX = e.clientX - panel.offsetLeft;
+offsetY = e.clientY - panel.offsetTop;
+panel.style.transition = 'none';
+});
+
+header.addEventListener('touchstart', (e) => {
+if (e.target.tagName === 'BUTTON') return;
+isDown = true;
+const t = e.touches[0];
+offsetX = t.clientX - panel.offsetLeft;
+offsetY = t.clientY - panel.offsetTop;
+panel.style.transition = 'none';
+});
+
+document.addEventListener('mousemove', (e) => {
+if (!isDown) return;
+let x = e.clientX - offsetX;
+let y = e.clientY - offsetY;
+x = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, x));
+y = Math.max(0, Math.min(window.innerHeight - 100, y));
+panel.style.left = x + 'px';
+panel.style.top = y + 'px';
+panel.style.right = 'auto';
+panel.style.bottom = 'auto';
+});
+
+document.addEventListener('touchmove', (e) => {
+if (!isDown) return;
+const t = e.touches[0];
+let x = t.clientX - offsetX;
+let y = t.clientY - offsetY;
+x = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, x));
+y = Math.max(0, Math.min(window.innerHeight - 100, y));
+panel.style.left = x + 'px';
+panel.style.top = y + 'px';
+panel.style.right = 'auto';
+panel.style.bottom = 'auto';
+});
+
+document.addEventListener('mouseup', () => {
+isDown = false;
+panel.style.transition = '';
+});
+
+document.addEventListener('touchend', () => {
+isDown = false;
+panel.style.transition = '';
+});
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LISTE DES STREAMS
+// ═══════════════════════════════════════════════════════════════════════════
+function toggleStreamsList() {
+const list = document.getElementById('streams-list');
+list.classList.toggle('on');
+if (list.classList.contains('on')) {
+renderStreamsList();
+}
+}
+
+function renderStreamsList() {
+const content = document.getElementById('streams-content');
+let html = '';
+
+// Grouper par catégorie
+const categories = {
+'🛰️ ESPACE': ['iss_live', 'iss_hd', 'spacex', 'nasa'],
+'🌍 VILLES': ['new_york', 'paris', 'montreal', 'london', 'tokyo', 'dubai', 'miami', 'venice'],
+'🌤️ MÉTÉO': ['meteo_europe', 'meteo_france', 'meteo_monde'],
+'🚗 TRAFIC': ['trafic_paris'],
+'✈️ AÉROPORTS': ['airport_jfk', 'airport_lhr'],
+'🚄 TRAINS': ['train_japan'],
+'🌋 NATURE': ['volcano_iceland', 'beach_hawaii', 'aquarium_monterey'],
+};
+
+for (const [cat, keys] of Object.entries(categories)) {
+html += `<div style="color:#9d4edd;font-size:9px;padding:8px 10px 4px;letter-spacing:1.5px;">${cat}</div>`;
+for (const key of keys) {
+if (STREAMS[key]) {
+html += `<div class="stream-item" onclick="openVideo('${key}');toggleStreamsList();">
+<span class="icon">▶</span>${STREAMS[key].nom}
+</div>`;
+}
+}
+}
+
+content.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TROUVER LES STREAMS PROCHES D'UNE POSITION
+// ═══════════════════════════════════════════════════════════════════════════
+function haversine(lat1, lng1, lat2, lng2) {
+const R = 6371;
+const dLat = (lat2 - lat1) * Math.PI / 180;
+const dLng = (lng2 - lng1) * Math.PI / 180;
+const a = Math.sin(dLat/2)**2 +
+Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) *
+Math.sin(dLng/2)**2;
+return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function findNearbyStreams(lat, lng) {
+let best = null, bestDist = 5000; // 5000 km
+for (const [key, s] of Object.entries(STREAMS)) {
+if (s.type === 'youtube' && (s.lat || s.lng)) {
+const d = haversine(lat, lng, s.lat, s.lng);
+if (d < bestDist) {
+bestDist = d;
+best = key;
+}
+}
+}
+if (best && bestDist < 1000) {
+setTimeout(() => {
+if (confirm(`📺 Flux vidéo proche :\n\n${STREAMS[best].nom}\n\nOuvrir ?`)) {
+openVideo(best);
+}
+}, 500);
+}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SÉQUENCE D'ACCUEIL
+// ═══════════════════════════════════════════════════════════════════════════
+setTimeout(() => {
+document.getElementById('loading').classList.add('hidden');
+
+// Vue espace profond
+viewer.camera.setView({
+destination: Cesium.Cartesian3.fromDegrees(0, 0, 60000000)
+});
+
+// Zoom progressif
+setTimeout(() => {
+viewer.camera.flyTo({
+destination: Cesium.Cartesian3.fromDegrees(-73.5674, 45.5019, 5000000),
+duration: 5.0
+});
+}, 1500);
+
+setTimeout(() => {
+viewer.camera.flyTo({
+destination: Cesium.Cartesian3.fromDegrees(-73.5674, 45.5019, 50000),
+orientation: {
+heading: 0,
+pitch: Cesium.Math.toRadians(-50),
+roll: 0
+},
+duration: 4.0
+});
+}, 7000);
+
+setTimeout(() => {
+viewer.camera.flyTo({
+destination: Cesium.Cartesian3.fromDegrees(-73.5674, 45.5019, 2000),
+orientation: {
+heading: 0,
+pitch: Cesium.Math.toRadians(-45),
+roll: 0
+},
+duration: 3.0
+});
+}, 12000);
+
+// Ouvrir automatiquement l'ISS Live après 14s
+setTimeout(() => {
+if (confirm('🛰️ Voulez-vous voir la vidéo LIVE de l\'ISS (Station Spatiale Internationale) ?')) {
+openVideo('iss_live');
+}
+}, 14000);
+
+}, 2000);
+
+console.log('🌍 NEXUS EARTH LIVE v2.0.0 — Actif');
+console.log('📺 ' + Object.keys(STREAMS).length + ' flux vidéo disponibles');
+</script>
+
+</body>
+</html>
+"""
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SERVEUR HTTP
+# ═══════════════════════════════════════════════════════════════════════════
+class HandlerNexus(http.server.SimpleHTTPRequestHandler):
+def do_GET(self):
+if self.path in ('/', '/index.html', '/zoom.html', '/live.html'):
+# Injecter les streams
+html = HTML.replace("const STREAMS = {", "const STREAMS = " + json.dumps(STREAMS, ensure_ascii=False) + "; const _OLD = {")
+# Le HTML contient déjà un objet STREAMS vide côté JS, on le remplace
+# On va plutôt injecter via une balise script
+streams_json = json.dumps(STREAMS, ensure_ascii=False)
+html = HTML.replace(
+"console.log('🌍 NEXUS EARTH LIVE v2.0.0 — Actif');",
+f"const STREAMS = {streams_json};\nconsole.log('🌍 NEXUS EARTH LIVE v2.0.0 — Actif');"
+)
+# Nettoyer l'ancien objet STREAMS vide s'il existe
+html = html.replace("const STREAMS = {};\n", "")
+
+self.send_response(200)
+self.send_header('Content-Type', 'text/html; charset=utf-8')
+self.send_header('Cache-Control', 'no-cache')
+self.end_headers()
+self.wfile.write(html.encode('utf-8'))
+
+elif self.path == '/streams.json':
+self.send_response(200)
+self.send_header('Content-Type', 'application/json; charset=utf-8')
+self.send_header('Access-Control-Allow-Origin', '*')
+self.end_headers()
+self.wfile.write(json.dumps(STREAMS, ensure_ascii=False, indent=2).encode('utf-8'))
+
+else:
+self.send_response(404)
+self.end_headers()
+self.wfile.write(b"404 - Not Found")
+
+def log_message(self, fmt, *args):
+pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# UTILS
+# ═══════════════════════════════════════════════════════════════════════════
+def trouver_port_libre(base=PORT_BASE, max_offset=50):
+for offset in range(max_offset):
+p = base + offset
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+try:
+s.bind((HOST, p))
+return p
+except OSError:
+continue
+return None
+
+
+def ouvrir_navigateur(url):
+systeme = platform.system()
+try:
+if systeme == "Darwin":
+subprocess.Popen(["open", url])
+elif systeme == "Windows":
+os.startfile(url)
+elif systeme == "Linux":
+for cmd in ["xdg-open", "firefox", "chromium", "google-chrome"]:
+try:
+subprocess.Popen([cmd, url],
+stdout=subprocess.DEVNULL,
+stderr=subprocess.DEVNULL)
+return True
+except FileNotFoundError:
+continue
+else:
+webbrowser.open(url)
+except Exception:
+print(f" Ouvre manuellement : {url}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MAIN
+# ═══════════════════════════════════════════════════════════════════════════
+def main():
+print()
+print("=" * 68)
+print(f" 🌍 NEXUS EARTH LIVE v{VERSION}")
+print(f" Auteur : {AUTEUR}")
+print("=" * 68)
+print()
+
+port = trouver_port_libre()
+if port is None:
+print("❌ Aucun port libre.")
+sys.exit(1)
+
+url = f"http://{HOST}:{port}/"
+print(f" 🌐 URL : {url}")
+print(f" 📡 Fonction : Vue satellite 3D + VIDÉO TEMPS RÉEL")
+print(f" 📺 Streams : {len(STREAMS)} flux live disponibles")
+print()
+print(f" 🎯 Flux inclus :")
+print(f" • ISS Live (NASA)")
+print(f" • Webcams : New York, Paris, Montréal, Tokyo, Dubaï...")
+print(f" • Météo satellite (Europe, France, Monde)")
+print(f" • Trafic Paris en direct")
+print(f" • Aéroports JFK, Heathrow")
+print(f" • SpaceX, NASA TV")
+print(f" • Volcans, plages, aquariums")
+print()
+print(f" 🎬 Séquence : 60 000 km → Montréal → 2 km + ISS Live")
+print()
+print(" ⏹️ Ctrl+C pour arrêter")
+print("=" * 68)
+print()
+
+httpd = socketserver.ThreadingTCPServer((HOST, port), HandlerNexus)
+httpd.allow_reuse_address = True
+httpd.daemon_threads = True
+
+def ouvrir_apres_delai():
+import time
+time.sleep(1.5)
+ouvrir_navigateur(url)
+
+threading.Thread(target=ouvrir_apres_delai, daemon=True).start()
+
+try:
+httpd.serve_forever()
+except KeyboardInterrupt:
+print("\n 👋 Arrêt...")
+httpd.shutdown()
+httpd.server_close()
+
+
+if __name__ == "__main__":
+main()
